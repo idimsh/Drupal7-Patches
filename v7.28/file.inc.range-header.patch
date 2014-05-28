@@ -1,0 +1,49 @@
+--- original/includes/file.inc	2014-05-08 07:05:00.000000000 +0300
++++ modified/includes/file.inc	2014-05-28 14:33:31.000000000 +0300
+@@ -1965,12 +1965,44 @@
+   foreach ($headers as $name => $value) {
+     drupal_add_http_header($name, $value);
+   }
++  $use_range = $filesize = $range_begin = $range_end = NULL;
++  if(isset($_SERVER['HTTP_RANGE'])) {
++    if (is_readable($uri) && FALSE !== ($filesize = @filesize($uri)) ) {
++      list(, $range_begin) = explode('=', $_SERVER['HTTP_RANGE'], 2);
++      list($range_begin) = explode(',', $range_begin, 2);
++      list($range_begin, $range_end) = explode('-', $range_begin);
++      $range_begin = intval($range_begin);
++      $range_end = $range_end === NULL ? intval($range_end) : $filesize - 1;
++      if ($range_end >= 0) {
++        $use_range = TRUE;
++        $new_length = $range_end - $range_begin + 1;
++        // Override Headers
++        drupal_add_http_header('Status', '206 Partial Content');
++        drupal_add_http_header('Content-Length', $new_length);
++        drupal_add_http_header('Content-Range', "bytes {$range_begin}-{$range_end}/{$filesize}");
++      }
++    }
++  }
+   drupal_send_headers();
+   $scheme = file_uri_scheme($uri);
+   // Transfer file in 1024 byte chunks to save memory usage.
+   if ($scheme && file_stream_wrapper_valid_scheme($scheme) && $fd = fopen($uri, 'rb')) {
+-    while (!feof($fd)) {
+-      print fread($fd, 1024);
++    $chunk_size = 4096;
++    if ($use_range) {
++      fseek($fd, $range_begin);
++      $read_bytes = 0;
++      while ($read_bytes < $new_length && !feof($fd)) {
++        $bytes_left = $new_length - $read_bytes;
++        $new_read_length = min($chunk_size, $bytes_left);
++        $chunk_data = fread($fd, $new_read_length);
++        $read_bytes += strlen($chunk_data);
++        print $chunk_data;
++      }
++    }
++    else {
++      while (!feof($fd)) {
++        print fread($fd, $chunk_size);
++      }
+     }
+     fclose($fd);
+   }
